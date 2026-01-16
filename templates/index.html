@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Replacement Simulator</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        /* General Styles */
+        body {
+            background-color: #f0f2f5; /* Light grayish-blue */
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            text-align: center;
+        }
+
+        /* Frame Styling */
+        .container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;  /* Center content horizontally */
+    align-items: center;       /* Align items vertically */
+    gap: 10px;                 /* Add spacing between elements */
+    padding: 15px;
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    max-width: 650px;          /* Adjust width */
+    margin: 20px auto;
+    border: 2px solid #007bff;
+    text-align: center;
+}
+
+        /* Input and Button Styling */
+        input, select, button {
+            margin: 5px;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+
+        button {
+            background-color: #007bff; /* Bright Blue */
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s ease-in-out;
+            border: none;
+            padding: 10px 15px;
+        }
+
+        button:hover {
+            background-color: #0056b3; /* Darker Blue */
+        }
+
+        /* Table Styling */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        th, td {
+            border: 1px solid #333;
+            padding: 10px;
+            text-align: center;
+        }
+
+        th {
+            background: #007bff;
+            color: white;
+        }
+
+        /* Page Fault and Hit Effects */
+        .fault {
+            background-color: red !important;
+            color: white;
+            padding: 5px;
+            border-radius: 5px;
+            animation: flashRed 3s ease-in-out forwards;
+        }
+
+        .hit {
+            background-color: green !important;
+            color: white;
+            padding: 5px;
+            border-radius: 5px;
+            animation: flashGreen 3s ease-in-out forwards;
+        }
+
+        @keyframes flashRed {
+    0% { background-color: red; color: white; }
+    50% { background-color: darkred; transform: scale(1.1); }
+    100% { background-color: red; color: white; } /* Keep red */
+}
+
+@keyframes flashGreen {
+    0% { background-color: green; color: white; }
+    50% { background-color: darkgreen; transform: scale(1.1); }
+    100% { background-color: green; color: white; } /* Keep green */
+}
+
+
+        /* Frame Visualization */
+        .frame-container {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .column {
+            display: flex;
+            flex-direction: column-reverse;
+            align-items: center;
+            margin: 5px;
+            opacity: 0;
+            transition: opacity 0.7s ease-in-out;
+        }
+
+        .frame-stack {
+            width: 55px;
+            height: 55px;
+            border: 2px solid #007bff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin: 5px;
+            background-color: white;
+            box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.3);
+            transition: all 0.5s ease-in-out;
+        }
+
+        .page-indicator {
+            width: 55px;
+            height: 55px;
+            line-height: 55px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 5px;
+            color: white;
+            background-color: #007bff;
+            box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .fade-in {
+            opacity: 1 !important;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .container {
+                width: 90%;
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Page Replacement Simulator (LRU & MRU)</h1>
+
+    <div class="container">
+        <label>Enter Page Sequence:</label>
+        <input type="text" id="pageSequence" placeholder="e.g. 1,2,3,4,1,2">
+
+        <label>Frame Size:</label>
+        <input type="number" id="frameSize" min="1" value="3">
+
+        <label>Algorithm:</label>
+        <select id="algorithm">
+            <option value="LRU">LRU</option>
+            <option value="MRU">MRU</option>
+        </select>
+
+        <button onclick="runSimulation()">Run Simulation</button>
+    </div>
+
+    <h2>Graphical Memory Visualization</h2>
+    <div class="frame-container" id="frameVisualization"></div>
+
+    <button id="playPauseButton" onclick="toggleAnimation()">Pause</button>
+
+    <h2>Simulation Result</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Step</th>
+                <th>Frames</th>
+                <th>Miss/Hit</th>
+            </tr>
+        </thead>
+        <tbody id="resultTable"></tbody>
+    </table>
+
+    <h2>Total Page Faults: <span id="totalFaults">0</span></h2>
+
+    <script>
+        let isPlaying = true;
+        let stepIndex = 0;
+        let animationTimeout;
+        let resultData = [];
+        let pageFaultsData = [];
+        let sequenceData = [];
+    
+        function runSimulation() {
+            const sequence = document.getElementById("pageSequence").value.split(",").map(Number);
+            const frameSize = parseInt(document.getElementById("frameSize").value);
+            const algorithm = document.getElementById("algorithm").value;
+    
+            fetch("/simulate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sequence, frameSize, algorithm })
+            })
+            .then(response => response.json())
+            .then(data => {
+                resultData = data.result;
+                pageFaultsData = data.page_faults;
+                sequenceData = sequence;
+                stepIndex = 0;
+                isPlaying = true;
+                document.getElementById("frameVisualization").innerHTML = "";
+                document.getElementById("resultTable").innerHTML = "";
+                document.getElementById("totalFaults").textContent = data.page_faults.filter(fault => fault).length;
+                animateFrames();
+            })
+            .catch(error => console.error("Error:", error));
+        }
+    
+        function animateFrames() {
+            if (!isPlaying || stepIndex >= resultData.length) return;
+    
+            const container = document.getElementById("frameVisualization");
+            let column = document.createElement("div");
+            column.classList.add("column", "fade-in");
+    
+            let pageIndicator = document.createElement("div");
+            pageIndicator.classList.add("page-indicator", "fade-in");
+            pageIndicator.textContent = sequenceData[stepIndex];
+            column.appendChild(pageIndicator);
+    
+            let framesText = [];
+    
+            resultData[stepIndex].forEach((page, index) => {
+                let frameBox = document.createElement("div");
+                frameBox.classList.add("frame-stack", "fade-in");
+                frameBox.textContent = page;
+                framesText.push(page);
+    
+                if (pageFaultsData[stepIndex]) {
+                    frameBox.classList.add("fault");
+                } else {
+                    frameBox.classList.add("hit");
+                }
+                column.appendChild(frameBox);
+            });
+    
+            container.appendChild(column);
+    
+            // Update Table
+            let resultTable = document.getElementById("resultTable");
+            let row = resultTable.insertRow();
+            let stepCell = row.insertCell(0);
+            let framesCell = row.insertCell(1);
+            let statusCell = row.insertCell(2);
+    
+            stepCell.textContent = stepIndex + 1;
+            framesCell.textContent = framesText.join(", ");
+            statusCell.textContent = pageFaultsData[stepIndex] ? "Miss" : "Hit";
+            statusCell.classList.add(pageFaultsData[stepIndex] ? "fault" : "hit");
+    
+            stepIndex++;
+            animationTimeout = setTimeout(animateFrames, 1000);
+        }
+    
+        function toggleAnimation() {
+            isPlaying = !isPlaying;
+            if (isPlaying) animateFrames();
+        }
+    </script>
+    
+</body>
+</html>

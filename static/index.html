@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Replacement Simulator</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        :root {
+            --primary: #0d6efd;
+            --primary-dark: #0a58ca;
+            --success: #28a745;
+            --danger: #dc3545;
+            --bg: #eaf2ff;
+            --text: #1f2937;
+            --box: 48; /* base pixel size for blocks */
+            --gap: 12;
+            --radius: 10px;
+        }
+
+        /* General Styles */
+        body {
+            background-color: var(--bg);
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            color: var(--text);
+        }
+
+        .shell {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px 20px 40px;
+        }
+
+        h1, h2 {
+            text-align: center;
+            margin: 6px 0 16px;
+        }
+
+        /* Controls */
+        .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            padding: 16px;
+            background: #ffffff;
+            border-radius: var(--radius);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+            border: 1px solid rgba(13, 110, 253, 0.25);
+            margin: 16px auto 24px;
+        }
+
+        .container label { font-weight: 600; display: block; margin-bottom: 6px; }
+
+        input, select, button {
+            width: 100%;
+            margin: 0;
+            padding: 10px 12px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: 1px solid #d0d7de;
+            box-sizing: border-box;
+        }
+
+        .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .actions button { width: auto; white-space: nowrap; min-width: 130px; }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            cursor: pointer;
+            transition: background 0.2s ease-in-out, transform 0.1s ease-in-out;
+            border: none;
+            padding: 10px 16px;
+        }
+
+        button:hover { background-color: var(--primary-dark); }
+        button:active { transform: translateY(1px); }
+
+        .subnote { font-size: 13px; color: #5b6b7a; text-align: right; }
+
+        /* Visualization area */
+        .viz-wrap {
+            background: #ffffff;
+            border: 1px solid rgba(13,110,253,0.2);
+            border-radius: var(--radius);
+            padding: 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+            overflow-x: auto; /* allow horizontal scroll for long sequences */
+        }
+
+        .frame-container {
+            display: flex;
+            align-items: flex-end;
+            gap: calc(var(--gap) * 1px);
+            margin-top: 8px;
+            transform-origin: top left;
+            will-change: transform;
+            scroll-snap-type: x proximity;
+            min-width: max(100%, 640px);
+        }
+
+        .column {
+            display: flex;
+            flex-direction: column-reverse;
+            align-items: center;
+            margin: 4px;
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 0.4s ease, transform 0.4s ease;
+            scroll-snap-align: start;
+        }
+
+        .frame-stack, .page-indicator {
+            width: calc(var(--box) * 1px);
+            height: calc(var(--box) * 1px);
+            border: 2px solid var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            margin: 4px;
+            background-color: white;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+            border-radius: 8px;
+            transition: transform 0.25s ease, box-shadow 0.25s ease;
+        }
+
+        .page-indicator {
+            color: white;
+            background-color: var(--primary);
+            border-color: var(--primary);
+            font-size: 16px;
+        }
+
+        .fade-in { opacity: 1 !important; transform: translateY(0) !important; }
+
+        /* Hit/Miss effects */
+        .fault {
+            background-color: var(--danger) !important;
+            color: white;
+            animation: pulseDanger 600ms ease;
+        }
+
+        .hit {
+            background-color: var(--success) !important;
+            color: white;
+            animation: pulseSuccess 600ms ease;
+        }
+
+        @keyframes pulseDanger {
+            0% { transform: scale(1); box-shadow: 0 0 0 rgba(220,53,69,0.0); }
+            50% { transform: scale(1.06); box-shadow: 0 0 0 10px rgba(220,53,69,0.18); }
+            100% { transform: scale(1); box-shadow: 0 0 0 rgba(220,53,69,0.0); }
+        }
+
+        @keyframes pulseSuccess {
+            0% { transform: scale(1); box-shadow: 0 0 0 rgba(40,167,69,0.0); }
+            50% { transform: scale(1.06); box-shadow: 0 0 0 10px rgba(40,167,69,0.18); }
+            100% { transform: scale(1); box-shadow: 0 0 0 rgba(40,167,69,0.0); }
+        }
+
+        /* Table Styling */
+        .table-wrap {
+            background: #ffffff;
+            border-radius: var(--radius);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+            border: 1px solid rgba(13,110,253,0.2);
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead th {
+            position: sticky;
+            top: 0;
+            background: var(--primary);
+            color: #fff;
+            z-index: 1;
+        }
+
+        th, td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px;
+            text-align: center;
+            font-size: 15px;
+        }
+
+        tbody tr:nth-child(odd) { background: #f8fafc; }
+
+        .table-scroll { max-height: 360px; overflow-y: auto; }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            :root { --box: 40; }
+            .shell { padding: 12px 12px 24px; }
+            .table-scroll { max-height: 280px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <h1>Page Replacement Simulator (LRU & MRU)</h1>
+
+        <div class="container">
+            <div>
+                <label for="pageSequence">Enter Page Sequence</label>
+                <input type="text" id="pageSequence" placeholder="e.g. 1,3,4,5,2,3,1,2,3,2,1,4,1" value="1,3,4,5,2,3,1,2,3,2,1,4,1">
+            </div>
+            <div>
+                <label for="frameSize">Frame Size</label>
+                <input type="number" id="frameSize" min="1" value="4">
+            </div>
+            <div>
+                <label for="algorithm">Algorithm</label>
+                <select id="algorithm">
+                    <option value="LRU">LRU</option>
+                    <option value="MRU">MRU</option>
+                    <option value="FIFO">FIFO</option>
+                    <option value="Optimal">Optimal</option>
+                </select>
+            </div>
+            <div>
+                <label for="vizScale">Visualization Scale</label>
+                <input type="range" id="vizScale" min="60" max="120" value="90">
+                <div class="subnote">Adjust to fit without browser zoom</div>
+            </div>
+            <div class="actions">
+                <button type="button" onclick="runSimulation()">Run Simulation</button>
+                <button type="button" id="playPauseButton" onclick="toggleAnimation()">Pause</button>
+                <button type="button" id="compareBtn" onclick="compareAll()">Compare All</button>
+            </div>
+        </div>
+
+        <h2>Graphical Memory Visualization</h2>
+        <div class="viz-wrap">
+            <div class="frame-container" id="frameVisualization"></div>
+        </div>
+
+        <h2>Simulation Result</h2>
+        <div class="table-wrap">
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Step</th>
+                            <th>Frames</th>
+                            <th>Miss/Hit</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultTable"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <h2>Total Page Faults: <span id="totalFaults">0</span></h2>
+
+        <h2>Algorithm Comparison</h2>
+        <div id="comparePanel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:stretch;margin-top:8px"></div>
+    </div>
+
+    <script>
+        let isPlaying = true;
+        let stepIndex = 0;
+        let animationTimeout;
+        let resultData = [];
+        let pageFaultsData = [];
+        let sequenceData = [];
+
+        const themes = {
+            LRU: '#0d6efd',
+            MRU: '#9b59b6',
+            FIFO: '#f39c12',
+            Optimal: '#00b894'
+        };
+
+        function setTheme(alg) {
+            const color = themes[alg] || themes.LRU;
+            document.documentElement.style.setProperty('--primary', color);
+            document.documentElement.style.setProperty('--primary-dark', color);
+        }
+    
+        function runSimulation() {
+            const sequence = document.getElementById("pageSequence").value
+                .split(",")
+                .map(s => parseInt(s.trim(), 10))
+                .filter(n => Number.isFinite(n));
+            const frameSize = parseInt(document.getElementById("frameSize").value);
+            const algorithm = document.getElementById("algorithm").value;
+
+            setTheme(algorithm);
+            const { result, page_faults } = simulate(sequence, frameSize, algorithm);
+            resultData = result;
+            pageFaultsData = page_faults;
+            sequenceData = sequence;
+            stepIndex = 0;
+            isPlaying = true;
+            document.getElementById("frameVisualization").innerHTML = "";
+            document.getElementById("resultTable").innerHTML = "";
+            document.getElementById("totalFaults").textContent = page_faults.filter(fault => fault).length;
+            animateFrames();
+        }
+    
+        function animateFrames() {
+            if (!isPlaying || stepIndex >= resultData.length) return;
+
+            const container = document.getElementById("frameVisualization");
+            let column = document.createElement("div");
+            column.classList.add("column", "fade-in");
+
+            let pageIndicator = document.createElement("div");
+            pageIndicator.classList.add("page-indicator", "fade-in");
+            pageIndicator.textContent = sequenceData[stepIndex];
+            column.appendChild(pageIndicator);
+
+            let framesText = [];
+
+            resultData[stepIndex].forEach((page) => {
+                let frameBox = document.createElement("div");
+                frameBox.classList.add("frame-stack", "fade-in");
+                frameBox.textContent = page;
+                framesText.push(page);
+
+                if (pageFaultsData[stepIndex]) {
+                    frameBox.classList.add("fault");
+                } else {
+                    frameBox.classList.add("hit");
+                }
+                column.appendChild(frameBox);
+            });
+
+            container.appendChild(column);
+
+            // Update Table
+            let resultTable = document.getElementById("resultTable");
+            let row = resultTable.insertRow();
+            let stepCell = row.insertCell(0);
+            let framesCell = row.insertCell(1);
+            let statusCell = row.insertCell(2);
+
+            stepCell.textContent = stepIndex + 1;
+            framesCell.textContent = framesText.join(", ");
+            statusCell.textContent = pageFaultsData[stepIndex] ? "Miss" : "Hit";
+            statusCell.classList.add(pageFaultsData[stepIndex] ? "fault" : "hit");
+
+            stepIndex++;
+            animationTimeout = setTimeout(animateFrames, 700);
+        }
+    
+        function toggleAnimation() {
+            isPlaying = !isPlaying;
+            const btn = document.getElementById("playPauseButton");
+            btn.textContent = isPlaying ? "Pause" : "Play";
+            if (isPlaying) animateFrames();
+        }
+
+        function applyScale(val) {
+            const scale = Number(val) / 100;
+            const viz = document.getElementById("frameVisualization");
+            viz.style.transform = `scale(${scale})`;
+            viz.style.transformOrigin = "top left";
+        }
+
+        // Pure client-side implementations of algorithms
+        function simulate(sequence, frameSize, algorithm) {
+            const alg = algorithm.toUpperCase();
+            if (alg === 'LRU') return simulate_lru(sequence, frameSize);
+            if (alg === 'MRU') return simulate_mru(sequence, frameSize);
+            if (alg === 'FIFO') return simulate_fifo(sequence, frameSize);
+            if (alg === 'OPTIMAL') return simulate_optimal(sequence, frameSize);
+            return { result: [], page_faults: [] };
+        }
+
+        function simulate_lru(sequence, frameSize) {
+            const frames = [];
+            const output = [];
+            const faults = [];
+            for (const page of sequence) {
+                let fault = false;
+                const idx = frames.indexOf(page);
+                if (idx === -1) {
+                    fault = true;
+                    if (frames.length >= frameSize) frames.shift();
+                    frames.push(page);
+                } else {
+                    frames.splice(idx, 1);
+                    frames.push(page);
+                }
+                output.push([...frames]);
+                faults.push(fault);
+            }
+            return { result: output, page_faults: faults };
+        }
+
+        function simulate_mru(sequence, frameSize) {
+            const frames = [];
+            const output = [];
+            const faults = [];
+            let mru = null;
+            for (const page of sequence) {
+                let fault = false;
+                if (!frames.includes(page)) {
+                    fault = true;
+                    if (frames.length >= frameSize && mru !== null && frames.includes(mru)) {
+                        frames.splice(frames.indexOf(mru), 1);
+                    }
+                    frames.push(page);
+                }
+                mru = page;
+                output.push([...frames]);
+                faults.push(fault);
+            }
+            return { result: output, page_faults: faults };
+        }
+
+        function simulate_fifo(sequence, frameSize) {
+            const frames = [];
+            const order = [];
+            const output = [];
+            const faults = [];
+            for (const page of sequence) {
+                let fault = false;
+                if (!frames.includes(page)) {
+                    fault = true;
+                    if (frames.length >= frameSize) {
+                        const evict = order.shift();
+                        const pos = frames.indexOf(evict);
+                        if (pos !== -1) frames.splice(pos, 1);
+                    }
+                    frames.push(page);
+                    order.push(page);
+                }
+                output.push([...frames]);
+                faults.push(fault);
+            }
+            return { result: output, page_faults: faults };
+        }
+
+        function simulate_optimal(sequence, frameSize) {
+            const frames = [];
+            const output = [];
+            const faults = [];
+            for (let i = 0; i < sequence.length; i++) {
+                const page = sequence[i];
+                let fault = false;
+                if (!frames.includes(page)) {
+                    fault = true;
+                    if (frames.length < frameSize) {
+                        frames.push(page);
+                    } else {
+                        let farthest = -1, victim = null;
+                        for (const f of frames) {
+                            const nextIndex = sequence.slice(i + 1).indexOf(f);
+                            const nextPos = nextIndex === -1 ? Infinity : i + 1 + nextIndex;
+                            if (nextPos > farthest) { farthest = nextPos; victim = f; }
+                        }
+                        const pos = frames.indexOf(victim);
+                        if (pos !== -1) frames.splice(pos, 1);
+                        frames.push(page);
+                    }
+                }
+                output.push([...frames]);
+                faults.push(fault);
+            }
+            return { result: output, page_faults: faults };
+        }
+
+        function compareAll() {
+            const sequence = document.getElementById("pageSequence").value
+                .split(",")
+                .map(s => parseInt(s.trim(), 10))
+                .filter(n => Number.isFinite(n));
+            const frameSize = parseInt(document.getElementById("frameSize").value);
+            const algorithms = ['LRU','MRU','FIFO','Optimal'];
+            const panel = document.getElementById('comparePanel');
+            panel.innerHTML = '';
+            if (!sequence.length || !Number.isFinite(frameSize) || frameSize <= 0) {
+                const msg = document.createElement('div');
+                msg.textContent = 'Enter a valid sequence and frame size to compare.';
+                msg.style.padding = '10px';
+                msg.style.borderRadius = '8px';
+                msg.style.background = '#fff3cd';
+                msg.style.color = '#664d03';
+                msg.style.border = '1px solid #ffec99';
+                panel.appendChild(msg);
+                panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
+            const results = algorithms.map(a => {
+                const { page_faults } = simulate(sequence, frameSize, a);
+                return { alg: a, faults: page_faults.filter(Boolean).length };
+            });
+            results.forEach(({alg, faults}) => {
+                const card = document.createElement('div');
+                card.style.border = '1px solid rgba(0,0,0,0.1)';
+                card.style.borderRadius = '10px';
+                card.style.background = '#fff';
+                card.style.boxShadow = '0 6px 16px rgba(0,0,0,0.06)';
+                card.style.padding = '12px 14px';
+                const title = document.createElement('div');
+                title.textContent = alg + ' Faults';
+                title.style.fontWeight = '700';
+                title.style.marginBottom = '6px';
+                const bar = document.createElement('div');
+                bar.style.height = '10px';
+                bar.style.borderRadius = '8px';
+                bar.style.background = '#eef2ff';
+                const fill = document.createElement('div');
+                fill.style.height = '100%';
+                fill.style.borderRadius = '8px';
+                fill.style.width = Math.min(100, faults * 8) + '%';
+                fill.style.background = themes[alg] || '#0d6efd';
+                bar.appendChild(fill);
+                const count = document.createElement('div');
+                count.textContent = 'Total: ' + faults;
+                count.style.marginTop = '6px';
+                card.appendChild(title);
+                card.appendChild(bar);
+                card.appendChild(count);
+                panel.appendChild(card);
+            });
+            // ensure the panel comes into view after updating
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // Initialize handlers
+        document.addEventListener("DOMContentLoaded", () => {
+            const slider = document.getElementById("vizScale");
+            if (slider) {
+                applyScale(slider.value);
+                slider.addEventListener("input", (e) => applyScale(e.target.value));
+            }
+            const algoSel = document.getElementById('algorithm');
+            if (algoSel) {
+                setTheme(algoSel.value);
+                algoSel.addEventListener('change', (e) => setTheme(e.target.value));
+            }
+            // auto-run with default values
+            runSimulation();
+            compareAll();
+
+            // Ensure handlers are globally accessible for inline onclicks
+            window.runSimulation = runSimulation;
+            window.toggleAnimation = toggleAnimation;
+            window.compareAll = compareAll;
+
+            // Also bind by id to be extra-safe if inline onclick is blocked
+            const compareBtn = document.getElementById('compareBtn');
+            if (compareBtn) compareBtn.addEventListener('click', compareAll);
+        });
+    </script>
+    
+</body>
+</html>
